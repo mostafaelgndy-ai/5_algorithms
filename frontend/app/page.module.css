@@ -1,150 +1,407 @@
+/* ------------------------------------------------------------------ */
+/* Design tokens (light by default, dark via prefers-color-scheme)     */
+
 .page {
-  --background: #fafafa;
-  --foreground: #fff;
-
-  --text-primary: #000;
-  --text-secondary: #666;
-
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-  --button-secondary-border: #ebebeb;
+  --bg: #f4f6f8;
+  --card-bg: #ffffff;
+  --text: #1c2024;
+  --text-secondary: #626c76;
+  --border: #e3e7ec;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-text: #ffffff;
+  --error: #dc2626;
+  --error-bg: #fee2e2;
+  --error-text: #991b1b;
+  --row-alt: #f8fafc;
+  --axis: #d0d7de;
+  --root: #dc2626;
 
   display: flex;
   flex: 1;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  font-family: var(--font-geist-sans);
-  background-color: var(--background);
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-inter), Inter, Roboto, sans-serif;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-color-scheme: dark) {
+  .page {
+    --bg: #0e1116;
+    --card-bg: #171c23;
+    --text: #e6eaf0;
+    --text-secondary: #9aa5b1;
+    --border: #2a323c;
+    --accent: #3b82f6;
+    --accent-hover: #2f6fe0;
+    --accent-text: #ffffff;
+    --error: #f87171;
+    --error-bg: #3b1d1d;
+    --error-text: #fecaca;
+    --row-alt: #1c2229;
+    --axis: #3a434e;
+    --root: #f87171;
+  }
 }
 
 .main {
   display: flex;
-  flex: 1;
-  width: 100%;
-  max-width: 800px;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  background-color: var(--foreground);
-  padding: 120px 60px;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 760px;
+  padding: 2.5rem 1rem 4rem;
+  box-sizing: border-box;
 }
 
-.intro {
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+
+.header {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 24px;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
 }
 
-.intro h1 {
-  max-width: 320px;
-  font-size: 40px;
+.title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards, fields, buttons                                              */
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 4%);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.fieldWide {
+  width: 100%;
+}
+
+.fieldLabel {
+  font-size: 0.9rem;
   font-weight: 600;
-  line-height: 48px;
-  letter-spacing: -2.4px;
-  text-wrap: balance;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
-.intro p {
-  max-width: 440px;
-  font-size: 18px;
-  line-height: 32px;
-  text-wrap: balance;
+.helpText {
+  font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
-.intro a {
-  font-weight: 500;
-  color: var(--text-primary);
+.fieldError {
+  font-size: 0.8rem;
+  color: var(--error);
+  font-weight: 600;
 }
 
-.ctas {
-  display: flex;
-  flex-direction: row;
+.input,
+.select {
+  font-size: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 44px;
   width: 100%;
-  max-width: 440px;
-  gap: 16px;
-  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-.ctas a {
+.select {
+  font-family: inherit;
+  max-width: 340px;
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.inputError {
+  border-color: var(--error);
+}
+
+.equationInput {
+  width: 100%;
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem 1.25rem;
+  width: 100%;
+}
+
+.actions {
   display: flex;
-  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.solveButton,
+.clearButton {
+  display: inline-flex;
   align-items: center;
-  height: 40px;
-  padding: 0 16px;
-  border-radius: 128px;
-  border: 1px solid transparent;
-  transition: 0.2s;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  min-width: 120px;
+  padding: 0.6rem 1.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 8px;
   cursor: pointer;
-  width: fit-content;
-  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  font-family: inherit;
 }
 
-a.primary {
-  background: var(--text-primary);
-  color: var(--background);
-  gap: 8px;
+.solveButton {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: 1px solid var(--accent);
 }
 
-a.secondary {
-  border-color: var(--button-secondary-border);
+.solveButton:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 
-/* Enable hover only on non-touch devices */
-@media (hover: hover) and (pointer: fine) {
-  a.primary:hover {
-    background: var(--button-primary-hover);
-    border-color: transparent;
+.solveButton:disabled,
+.clearButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.clearButton {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.clearButton:hover:not(:disabled) {
+  background: var(--row-alt);
+}
+
+/* ------------------------------------------------------------------ */
+/* Spinner (loading state on the Solve button)                         */
+
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-text) 40%, transparent);
+  border-top-color: var(--accent-text);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
-
-  a.secondary:hover {
-    background: var(--button-secondary-hover);
-    border-color: transparent;
-  }
 }
 
-@media (max-width: 600px) {
+/* ------------------------------------------------------------------ */
+/* Error box                                                           */
+
+.errorBox {
+  background: var(--error-bg);
+  color: var(--error-text);
+  border: 1px solid var(--error);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Result metrics                                                      */
+
+.resultGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  width: 100%;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  min-width: 0;
+}
+
+.metricLabel {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metricValue {
+  font-size: 1.35rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ */
+/* Plot                                                                */
+
+.plot {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+.plotLine {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.plotAxis {
+  stroke: var(--axis);
+  stroke-width: 1;
+}
+
+.rootMarker {
+  stroke: var(--root);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+}
+
+.rootDot {
+  fill: var(--root);
+}
+
+/* ------------------------------------------------------------------ */
+/* Steps table                                                         */
+
+.toggleSteps {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  min-height: 44px;
+  font-family: inherit;
+}
+
+.toggleSteps:hover {
+  background: var(--row-alt);
+}
+
+.tableScroll {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 480px;
+}
+
+.table th,
+.table td {
+  padding: 0.55rem 0.85rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.table th:first-child,
+.table td:first-child {
+  text-align: left;
+}
+
+.table thead th {
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.table tbody tr:nth-child(even) {
+  background: var(--row-alt);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive: single column on small screens                          */
+
+@media (max-width: 640px) {
   .main {
-    padding: 48px 24px;
+    padding: 1.5rem 0.75rem 3rem;
   }
 
-  .intro {
-    gap: 16px;
+  .card {
+    padding: 1.1rem;
   }
 
-  .intro h1 {
-    font-size: 32px;
-    line-height: 40px;
-    letter-spacing: -1.92px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .logo {
-    filter: invert();
+  .fieldGrid {
+    grid-template-columns: 1fr;
   }
 
-  .page {
-    --background: #000;
-    --foreground: #000;
-
-    --text-primary: #ededed;
-    --text-secondary: #999;
-
-    --button-primary-hover: #ccc;
-    --button-secondary-hover: #1a1a1a;
-    --button-secondary-border: #1a1a1a;
+  .title {
+    font-size: 1.4rem;
   }
-}
 
-.code {
-  font-family: var(--font-geist-mono);
-  font-size: 0.9em;
-  background: color-mix(in srgb, currentColor 8%, transparent);
-  padding: 0.1em 0.4em;
-  border-radius: 6px;
+  .solveButton,
+  .clearButton {
+    flex: 1;
+  }
 }
