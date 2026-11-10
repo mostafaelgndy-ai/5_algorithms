@@ -1,0 +1,15 @@
+{
+  "name": "5_algorithms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "5_algorithms - Next.js frontend + FastAPI backend",
+  "scripts": {
+    "start": "concurrently -n backend,frontend -c blue,magenta \"npm run start:backend\" \"npm run start:frontend\"",
+    "start:backend": "cd backend && .venv\\Scripts\\python -m uvicorn main:app --reload --port 8000",
+    "start:frontend": "npm run dev --prefix frontend",
+    "setup": "npm install && npm install --prefix frontend && python -m venv backend/.venv && backend\\.venv\\Scripts\\python -m pip install -r backend/requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
