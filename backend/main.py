@@ -189,7 +189,7 @@ def make_function(equation: str):
 # Request / response models
 # ---------------------------------------------------------------------------
 
-Method = Literal["bisection", "gauss_elimination", "gauss_seidel", "secant", "modified_secant"]
+Method = Literal["bisection", "gauss_jacobi", "gauss_seidel", "secant", "modified_secant"]
 
 
 class Params(BaseModel):
@@ -330,43 +330,33 @@ def _parse_system(system: list[list[float]]) -> list[list[float]]:
     return [row[:] for row in system]
 
 
-def _gauss_elimination(matrix: list[list[float]]):
-    """Gauss Elimination with partial pivoting. Rows are appended to the steps
-    after every row operation, as operation descriptions of the form
-    `R{k+1} -> R{k+1} - factor * R{i+1}`."""
-    aug = matrix
-    n = len(aug)
+def _gauss_jacobi(matrix: list[list[float]], tol: float, max_iter: int):
+    """Gauss-Jacobi: iterate x_i^(k+1) = (b_i - sum_{j != i} A[i][j] * x_j^(k)) / A[i][i],
+    using only the values from the previous iteration."""
+    n = len(matrix)
+    A = [row[:n] for row in matrix]
+    b = [row[n] for row in matrix]
+    if any(abs(A[i][i]) < 1e-300 for i in range(n)):
+        raise SolverError(
+            "A zero element on the diagonal, Gauss-Jacobi cannot solve this system"
+        )
+    x = [0.0] * n
     steps: list[dict[str, Any]] = []
-
-    def snapshot(op: str, row_index: int):
-        entry: dict[str, Any] = {"i": len(steps) + 1, "op": op}
-        for j in range(n + 1):
-            entry[f"v{j}"] = round(aug[row_index][j], 8)
+    for it in range(1, max_iter + 1):
+        x_new = [0.0] * n
+        for i in range(n):
+            s = b[i] - sum(A[i][j] * x[j] for j in range(n) if j != i)
+            x_new[i] = s / A[i][i]
+        err = max(abs(x_new[i] - x[i]) for i in range(n))
+        x = x_new
+        entry: dict[str, Any] = {"i": it}
+        for k in range(n):
+            entry[f"v{k}"] = round(x[k], 8)
+        entry["error"] = err
         steps.append(entry)
-
-    for i in range(n):
-        # Partial pivoting: move the largest coefficient in column i to the pivot.
-        pivot_row = max(range(i, n), key=lambda r: abs(aug[r][i]))
-        if abs(aug[pivot_row][i]) < 1e-300:
-            raise SolverError("The matrix is singular, Gauss Elimination cannot solve this system")
-        if pivot_row != i:
-            aug[i], aug[pivot_row] = aug[pivot_row], aug[i]
-            snapshot(f"R{i + 1} <-> R{pivot_row + 1}", i)
-        for k in range(i + 1, n):
-            factor = aug[k][i] / aug[i][i]
-            if factor == 0:
-                continue
-            for j in range(i, n + 1):
-                aug[k][j] -= factor * aug[i][j]
-            snapshot(f"R{k + 1} -> R{k + 1} - {factor:.6g}R{i + 1}", k)
-
-    # Back substitution
-    solution = [0.0] * n
-    for i in range(n - 1, -1, -1):
-        rhs = aug[i][n] - sum(aug[i][j] * solution[j] for j in range(i + 1, n))
-        solution[i] = rhs / aug[i][i]
-
-    return {"solution": solution, "steps": steps, "iterations": len(steps)}
+        if err < tol:
+            return {"solution": x, "steps": steps, "iterations": it}
+    raise SolverError("Tolerance was not reached within the maximum number of iterations")
 
 
 def _gauss_seidel(matrix: list[list[float]], tol: float, max_iter: int):
@@ -458,8 +448,8 @@ def solve(req: SolveRequest) -> dict[str, Any]:
             if p.x0 is None:
                 raise SolverError("The modified secant requires an initial guess (x0)")
             res = _modified_secant(f, p.x0, p.delta or 0.01, p.tolerance, p.max_iterations)
-        elif method == "gauss_elimination":
-            res = _gauss_elimination(system)
+        elif method == "gauss_jacobi":
+            res = _gauss_jacobi(system, p.tolerance, p.max_iterations)
         else:  # gauss_seidel
             res = _gauss_seidel(system, p.tolerance, p.max_iterations)
     except OverflowError:

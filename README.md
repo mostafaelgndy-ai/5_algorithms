@@ -21,13 +21,13 @@ bonus web UI (Next.js) that talks to a Python FastAPI backend.
 
 ## The five methods
 
-| Display name            | Required fields                              | Value sent to the API |
-| ----------------------- | -------------------------------------------- | --------------------- |
-| Bisection Method        | interval start `a`, end `b`                  | `bisection`           |
-| Gauss Elimination       | system `Ax = b` (matrix rows)                | `gauss_elimination`   |
-| Gauss-Seidel            | system `Ax = b` + tolerance + max iterations | `gauss_seidel`        |
-| Secant Method           | first guess `x0`, second `x1`                | `secant`              |
-| Modified Secant Method  | initial guess `x0`, perturbation delta       | `modified_secant`     |
+| Display name             | Required fields                                | Value sent to the API |
+| ------------------------ | ---------------------------------------------- | --------------------- |
+| Bisection Method         | interval start `a`, end `b`                    | `bisection`           |
+| Gauss-Jacobi Iteration   | system `Ax = b` + tolerance + max iterations   | `gauss_jacobi`        |
+| Gauss-Seidel Iteration   | system `Ax = b` + tolerance + max iterations   | `gauss_seidel`        |
+| Secant Method            | first guess `x0`, second `x1`                  | `secant`              |
+| Modified Secant Method   | initial guess `x0`, perturbation delta         | `modified_secant`     |
 
 
 Convergence criteria: `|x_new − x_old| < tolerance` (or `|f(x)| < tolerance`)
@@ -126,7 +126,7 @@ Step column keys by method:
 - Bisection: `i, a, b, c, fc, error`
 - Secant: `i, xnm1, xn, xnp1, fxn, error`
 - Modified Secant: `i, xn, fxn, f2, error`
-- Gauss Elimination: `i, op, v0..` (row operation + the resulting row values, the last value is `b`)
+- Gauss-Jacobi: `i, v0.., error` (`v0..v{n-1}` are `x1..xn`)
 - Gauss-Seidel: `i, v0.., error` (`v0..v{n-1}` are `x1..xn`)
 
 Failure (HTTP 400):
@@ -139,8 +139,7 @@ The UI shows the `message` from the backend in a red box. Server messages includ
 
 - `No root exists in the given interval (f(a) and f(b) have the same sign)`
 - `Invalid equation: ...`
-- `The matrix is singular, Gauss Elimination cannot solve this system`
-- `A zero element on the diagonal, Gauss-Seidel cannot solve this system`
+- `A zero element on the diagonal, Gauss-Jacobi/Gauss-Seidel cannot solve this system`
 - `Tolerance was not reached within the maximum number of iterations`
 - divergence / zero-denominator messages for Secant and Modified Secant
 
@@ -171,9 +170,8 @@ Examples: `x^3 - x - 2`, `x - cos(x)`, `exp(x) - 3`, `x^2 - 4*sin(x)`.
 
 - **Bisection**: repeatedly bisect `[a, b]`, keep the half where the sign of
   `f` changes. Error per row is `|b − a| / 2`.
-- **Gauss Elimination**: forward elimination with partial pivoting
-  (row swaps keep pivots nonzero); rows are recorded in the steps table after
-  every operation (`R3 -> R3 − 2R1` etc.), then back substitution.
+- **Gauss-Jacobi**: `x_i^(k+1) = (b_i − Σ_{j≠i} A[i][j]·x_j^(k)) / A[i][i]`,
+  computing every new value from the previous iteration only.
 - **Gauss-Seidel**: `x_i ← (b_i − Σ_{j≠i} A[i][j]·x_j) / A[i][i]`, using updated
   values immediately; stops when the max change is below the tolerance.
 - **Secant**: `x_{k+1} = x_k − f(x_k)·(x_k − x_{k-1}) / (f(x_k) − f(x_{k-1}))`.

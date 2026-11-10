@@ -3,12 +3,12 @@
 import { useState } from "react";
 import styles from "./page.module.css";
 
-type Method = "bisection" | "gauss_elimination" | "gauss_seidel" | "secant" | "modified_secant";
+type Method = "bisection" | "gauss_jacobi" | "gauss_seidel" | "secant" | "modified_secant";
 
 const METHODS: { value: Method; label: string }[] = [
   { value: "bisection", label: "Bisection Method" },
-  { value: "gauss_elimination", label: "Gauss Elimination" },
-  { value: "gauss_seidel", label: "Gauss-Seidel" },
+  { value: "gauss_jacobi", label: "Gauss-Jacobi Iteration" },
+  { value: "gauss_seidel", label: "Gauss-Seidel Iteration" },
   { value: "secant", label: "Secant Method" },
   { value: "modified_secant", label: "Modified Secant Method" },
 ];
@@ -65,17 +65,7 @@ function columnsFor(method: Method, firstStep: Step | undefined): Column[] {
     .filter((k) => /^v\d+$/.test(k))
     .sort((x, y) => Number(x.slice(1)) - Number(y.slice(1)));
 
-  if (method === "gauss_elimination") {
-    return [
-      { key: "i", label: "i" },
-      { key: "op", label: "operation", text: true },
-      ...valueKeys.map((k, idx) => ({
-        key: k,
-        label: idx === valueKeys.length - 1 ? "b" : `c${idx + 1}`,
-      })),
-    ];
-  }
-  // gauss_seidel
+  // gauss_jacobi / gauss_seidel
   return [
     { key: "i", label: "i" },
     ...valueKeys.map((k, idx) => ({ key: k, label: `x${idx + 1}` })),
@@ -116,13 +106,13 @@ export default function Home() {
   const [result, setResult] = useState<SolveResult | null>(null);
   const [showSteps, setShowSteps] = useState(true);
 
-  const isMatrix = method === "gauss_elimination" || method === "gauss_seidel";
+  const isMatrix = method === "gauss_jacobi" || method === "gauss_seidel";
   const needsInterval = method === "bisection";
   const needsX0 = method === "modified_secant";
   const needsX0X1 = method === "secant";
   const needsDelta = method === "modified_secant";
-  const needsTolerance = method !== "gauss_elimination";
-  const needsMaxIterations = method !== "gauss_elimination";
+  const needsTolerance = true;
+  const needsMaxIterations = true;
 
   function clear() {
     setMethod("bisection");
@@ -429,17 +419,13 @@ export default function Home() {
                   </div>
                 )}
                 <div className={styles.metric}>
-                  <span className={styles.metricLabel}>
-                    {method === "gauss_elimination" ? "Operations" : "Number of iterations"}
-                  </span>
+                  <span className={styles.metricLabel}>Number of iterations</span>
                   <span className={styles.metricValue}>{result.iterations}</span>
                 </div>
-                {method !== "gauss_elimination" && (
-                  <div className={styles.metric}>
-                    <span className={styles.metricLabel}>Final error</span>
-                    <span className={styles.metricValue}>{fmt(result.error)}</span>
-                  </div>
-                )}
+                <div className={styles.metric}>
+                  <span className={styles.metricLabel}>Final error</span>
+                  <span className={styles.metricValue}>{fmt(result.error)}</span>
+                </div>
                 <div className={styles.metric}>
                   <span className={styles.metricLabel}>Method used</span>
                   <span className={styles.metricValue}>
