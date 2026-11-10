@@ -27,6 +27,11 @@ def read_root():
     return {"message": "Welcome to the 5_algorithms backend"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 # ---------------------------------------------------------------------------
 # Equation parsing (safe evaluation of f(x))
 # ---------------------------------------------------------------------------

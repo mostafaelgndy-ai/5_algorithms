@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" dir="ltr" className={inter.variable}>
+    <html lang="en" dir="ltr" suppressHydrationWarning className={inter.variable}>
       <body>{children}</body>
     </html>
   );
