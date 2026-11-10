@@ -70,6 +70,31 @@ _ALLOWED_UNARYOPS = {
     ast.USub: lambda a: -a,
 }
 
+# Common Unicode lookalikes pasted from documents/browsers.
+_CHAR_MAP = {
+    ord("\u2212"): "-",  # minus sign
+    ord("\u2012"): "-",  # figure dash
+    ord("\u2013"): "-",  # en dash
+    ord("\u2014"): "-",  # em dash
+    ord("\u2015"): "-",  # horizontal bar
+    ord("\u00d7"): "*",  # multiplication sign
+    ord("\u22c5"): "*",  # dot operator
+    ord("\u00b7"): "*",  # middle dot
+    ord("\u00f7"): "/",  # division sign
+    ord("\uff0b"): "+",  # fullwidth plus
+    ord("\uff0d"): "-",  # fullwidth minus
+    ord("\u00b2"): "^2",  # superscript two
+    ord("\u00b3"): "^3",  # superscript three
+    ord("\u2070"): "^0",
+    ord("\u2074"): "^4",
+    ord("\u2075"): "^5",
+    ord("\u2076"): "^6",
+    ord("\u2077"): "^7",
+    ord("\u2078"): "^8",
+    ord("\u2079"): "^9",
+}
+
+
 
 class InvalidEquation(Exception):
     pass
@@ -128,6 +153,8 @@ def make_function(equation: str):
     anything that is not a plain numeric f(x) expression.
     """
     text = equation.strip().lower()
+    # Normalize lookalike Unicode characters (a pasted minus sign, etc.).
+    text = text.translate(_CHAR_MAP)
     text = text.replace("^", "**").replace("=", "")
     if not text:
         raise InvalidEquation("the equation is empty")
