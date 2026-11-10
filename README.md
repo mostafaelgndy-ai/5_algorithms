@@ -42,7 +42,16 @@ within `max_iterations`; otherwise the backend answers with
 ├── README.md
 ├── .gitignore
 ├── backend/              # FastAPI (Python 3.13 venv in backend/.venv)
-│   ├── main.py           # POST /api/solve + all five methods
+│   ├── main.py           # the FastAPI app + POST /api/solve dispatch
+│   ├── functions/        # one file per function
+│   │   ├── bisection.py
+│   │   ├── secant.py
+│   │   ├── modified_secant.py
+│   │   ├── gauss_jacobi.py
+│   │   ├── gauss_seidel.py
+│   │   ├── equation.py   # safe f(x) parsing (AST, ^ as power)
+│   │   ├── matrix.py     # augmented-matrix validation/split helpers
+│   │   └── common.py     # SolverError + finite() check
 │   ├── requirements.txt  # fastapi, uvicorn[standard]
 │   └── .venv/            # gitignored virtual environment
 └── frontend/             # Next.js 16 (App Router, TypeScript, Turbopack)

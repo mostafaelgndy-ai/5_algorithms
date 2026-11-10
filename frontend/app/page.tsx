@@ -304,7 +304,6 @@ export default function Home() {
         {/* Header */}
         <header className={styles.header}>
           <h1 className={styles.title}>Numerical Equation Solver</h1>
-          <p className={styles.subtitle}>Choose a method, enter your equation, and get the result.</p>
         </header>
 
         {/* Form */}
@@ -339,7 +338,6 @@ export default function Home() {
                 onChange={(e) => setEquation(e.target.value)}
               />
               <span className={styles.helpText}>
-                Use x as the variable, ^ for powers, and functions like sin(x), cos(x), exp(x), log(x).
               </span>
               {fieldErrors.equation && (
                 <span className={styles.fieldError}>{fieldErrors.equation}</span>
@@ -359,8 +357,6 @@ export default function Home() {
                 onChange={(e) => setSystem(e.target.value)}
               />
               <span className={styles.helpText}>
-                One row per line: the coefficients followed by the right-hand side, separated by
-                spaces. Example above: 3 equations in 3 unknowns.
               </span>
               {fieldErrors.system && <span className={styles.fieldError}>{fieldErrors.system}</span>}
             </label>
