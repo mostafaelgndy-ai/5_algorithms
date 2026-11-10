@@ -1,37 +1,34 @@
 # 5_algorithms — Numerical Equation Solver
 
-A Numerical Methods (Math 3) project: solve `f(x) = 0` using five classical
-root-finding algorithms. Includes a bonus web UI (Next.js) that talks to a
-Python FastAPI backend.
-
-> **Note:** the five algorithms were not named in the instructor's message.
-> The four implemented here (Bisection, False Position, Newton-Raphson, Secant)
-> are the common course methods; **Fixed Point** is a placeholder implementation
-> (`x_{k+1} = x_k − f(x_k)`) and should be adjusted to match the course.
-
----
+A Numerical Methods (Math 3) project: solve `f(x) = 0` with classical root-finding
+algorithms and solve linear systems `Ax = b` with the Gauss methods. Includes a
+bonus web UI (Next.js) that talks to a Python FastAPI backend.
 
 ## Features
 
 - Enter any equation in `x` — powers with `^`, functions like `sin`, `cos`, `exp`, `log`.
-- Pick a method from a dropdown; the required numeric fields change with it.
+  Unicode lookalikes (pasted minus signs, `x²`-style superscripts, `×`, `÷`) are normalized automatically.
+- Pick a method from a dropdown; the required fields change with it.
+- The Gauss methods accept a linear system typed as matrix rows in a text area.
 - Client-side validation before the request is sent (interval order, positive
-  tolerance, positive integer max iterations, etc.).
-- Result card: approximate root, number of iterations, final error, method used.
+  tolerance, positive integer max iterations, square system, etc.).
+- Result card: approximate root / solution vector, number of iterations
+  (or operations), final error, method used.
 - Collapsible steps table with one row per iteration (columns depend on the method).
-- An SVG plot of `f(x)` with the root marked.
+- An SVG plot of `f(x)` with the root marked (root-finding methods only).
 - Backend error messages are surfaced in a red error box.
 - Responsive layout (single column on mobile) with automatic dark mode.
 
 ## The five methods
 
-| Display name     | Required fields               | Value sent to the API |
-| ---------------- | ----------------------------- | --------------------- |
-| Bisection        | interval start `a`, end `b`   | `bisection`           |
-| False Position   | interval start `a`, end `b`   | `false_position`      |
-| Newton-Raphson   | initial guess `x0`            | `newton`              |
-| Secant           | first guess `x0`, second `x1` | `secant`              |
-| Fixed Point      | initial guess `x0`            | `fixed_point`         |
+| Display name            | Required fields                              | Value sent to the API |
+| ----------------------- | -------------------------------------------- | --------------------- |
+| Bisection Method        | interval start `a`, end `b`                  | `bisection`           |
+| Gauss Elimination       | system `Ax = b` (matrix rows)                | `gauss_elimination`   |
+| Gauss-Seidel            | system `Ax = b` + tolerance + max iterations | `gauss_seidel`        |
+| Secant Method           | first guess `x0`, second `x1`                | `secant`              |
+| Modified Secant Method  | initial guess `x0`, perturbation delta       | `modified_secant`     |
+
 
 Convergence criteria: `|x_new − x_old| < tolerance` (or `|f(x)| < tolerance`)
 within `max_iterations`; otherwise the backend answers with
@@ -79,7 +76,7 @@ npm run start
 
 ### `POST /api/solve`
 
-Request:
+Request (root-finding method):
 
 ```json
 {
@@ -89,9 +86,19 @@ Request:
 }
 ```
 
-Params are method-dependent: `a`, `b` for Bisection / False Position; `x0` for
-Newton-Raphson / Fixed Point; `x0` and `x1` for Secant; `tolerance`
-(default `0.0001`) and `max_iterations` (default `50`) always apply.
+Request (linear system):
+
+```json
+{
+  "method": "gauss_seidel",
+  "system": [[4, 3, 0, 120], [3, 4, -1, 127.4], [0, -1, 4, 91.5]],
+  "params": { "tolerance": 0.0001, "max_iterations": 50 }
+}
+```
+
+Params are method-dependent: `a`, `b` for Bisection; `x0`, `x1` for Secant;
+`x0` and `delta` (default `0.01`) for Modified Secant; `tolerance`
+(default `0.0001`) and `max_iterations` (default `50`) where applicable.
 
 Success response:
 
@@ -111,12 +118,16 @@ Success response:
 }
 ```
 
+For the Gauss methods the response has `solution` (the x vector) instead of
+`root`, and no `graph`.
+
 Step column keys by method:
 
-- Bisection / False Position: `i, a, b, c, fc, error`
-- Newton-Raphson: `i, xn, fxn, dfxn, error`
+- Bisection: `i, a, b, c, fc, error`
 - Secant: `i, xnm1, xn, xnp1, fxn, error`
-- Fixed Point: `i, xn, xnext, fxn, error`
+- Modified Secant: `i, xn, fxn, f2, error`
+- Gauss Elimination: `i, op, v0..` (row operation + the resulting row values, the last value is `b`)
+- Gauss-Seidel: `i, v0.., error` (`v0..v{n-1}` are `x1..xn`)
 
 Failure (HTTP 400):
 
@@ -128,9 +139,10 @@ The UI shows the `message` from the backend in a red box. Server messages includ
 
 - `No root exists in the given interval (f(a) and f(b) have the same sign)`
 - `Invalid equation: ...`
-- `The derivative equals zero`
+- `The matrix is singular, Gauss Elimination cannot solve this system`
+- `A zero element on the diagonal, Gauss-Seidel cannot solve this system`
 - `Tolerance was not reached within the maximum number of iterations`
-- divergence messages for Newton-Raphson, Secant, and Fixed Point
+- divergence / zero-denominator messages for Secant and Modified Secant
 
 If the request never reaches the server (network error), the UI shows
 *"Could not reach the server, please try again"*.
@@ -140,7 +152,7 @@ Example with curl:
 ```bash
 curl -X POST http://localhost:8000/api/solve \
   -H "Content-Type: application/json" \
-  -d '{"method": "newton", "equation": "x^3 - x - 2", "params": {"x0": 1.5}}'
+  -d '{"method": "modified_secant", "equation": "x^3 - x - 2", "params": {"x0": 1.5, "delta": 0.01}}'
 ```
 
 ### Supported equation syntax
@@ -159,13 +171,14 @@ Examples: `x^3 - x - 2`, `x - cos(x)`, `exp(x) - 3`, `x^2 - 4*sin(x)`.
 
 - **Bisection**: repeatedly bisect `[a, b]`, keep the half where the sign of
   `f` changes. Error per row is `|b − a| / 2`.
-- **False Position (Regula Falsi)**: like Bisection but interpolates a
-  straight line between `(a, f(a))` and `(b, f(b))` and uses its root.
-- **Newton-Raphson**: `x_{k+1} = x_k − f(x_k)/f'(x_k)`. The derivative is
-  computed numerically (central finite difference).
+- **Gauss Elimination**: forward elimination with partial pivoting
+  (row swaps keep pivots nonzero); rows are recorded in the steps table after
+  every operation (`R3 -> R3 − 2R1` etc.), then back substitution.
+- **Gauss-Seidel**: `x_i ← (b_i − Σ_{j≠i} A[i][j]·x_j) / A[i][i]`, using updated
+  values immediately; stops when the max change is below the tolerance.
 - **Secant**: `x_{k+1} = x_k − f(x_k)·(x_k − x_{k-1}) / (f(x_k) − f(x_{k-1}))`.
-- **Fixed Point (placeholder)**: `x_{k+1} = x_k − f(x_k)`, i.e. iterating
-  `g(x) = x − f(x)`; adjust if the course defines `g(x)` differently.
+- **Modified Secant**: `x_{k+1} = x_k − δ·x_k·f(x_k) / (f(x_k + δ·x_k) − f(x_k))`
+  with δ (default `0.01`) from the Delta field.
 
 ## Tech stack
 

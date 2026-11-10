@@ -3,52 +3,40 @@
 import { useState } from "react";
 import styles from "./page.module.css";
 
-type Method = "bisection" | "false_position" | "newton" | "secant" | "fixed_point";
+type Method = "bisection" | "gauss_elimination" | "gauss_seidel" | "secant" | "modified_secant";
 
 const METHODS: { value: Method; label: string }[] = [
-  { value: "bisection", label: "Bisection" },
-  { value: "false_position", label: "False Position" },
-  { value: "newton", label: "Newton-Raphson" },
-  { value: "secant", label: "Secant" },
-  { value: "fixed_point", label: "Fixed Point" },
+  { value: "bisection", label: "Bisection Method" },
+  { value: "gauss_elimination", label: "Gauss Elimination" },
+  { value: "gauss_seidel", label: "Gauss-Seidel" },
+  { value: "secant", label: "Secant Method" },
+  { value: "modified_secant", label: "Modified Secant Method" },
 ];
 
-type Step = Record<string, number>;
+type Step = Record<string, number | string>;
+
+type Column = { key: string; label: string; text?: boolean };
 
 type GraphData = { root: number; points: number[][] };
 
 type SolveResult = {
   method: Method;
-  equation: string;
-  root: number;
+  equation: string | null;
+  root: number | null;
+  solution: number[] | null;
   iterations: number;
   error: number;
   steps: Step[];
-  graph: GraphData;
+  graph: GraphData | null;
 };
 
-const COLUMNS: Record<Method, { key: string; label: string }[]> = {
+const SCALAR_COLUMNS: Partial<Record<Method, Column[]>> = {
   bisection: [
     { key: "i", label: "i" },
     { key: "a", label: "a" },
     { key: "b", label: "b" },
     { key: "c", label: "c" },
     { key: "fc", label: "f(c)" },
-    { key: "error", label: "error" },
-  ],
-  false_position: [
-    { key: "i", label: "i" },
-    { key: "a", label: "a" },
-    { key: "b", label: "b" },
-    { key: "c", label: "c" },
-    { key: "fc", label: "f(c)" },
-    { key: "error", label: "error" },
-  ],
-  newton: [
-    { key: "i", label: "i" },
-    { key: "xn", label: "xn" },
-    { key: "fxn", label: "f(xn)" },
-    { key: "dfxn", label: "f'(xn)" },
     { key: "error", label: "error" },
   ],
   secant: [
@@ -59,16 +47,45 @@ const COLUMNS: Record<Method, { key: string; label: string }[]> = {
     { key: "fxn", label: "f(xn)" },
     { key: "error", label: "error" },
   ],
-  fixed_point: [
+  modified_secant: [
     { key: "i", label: "i" },
     { key: "xn", label: "xn" },
-    { key: "xnext", label: "x(n+1)" },
     { key: "fxn", label: "f(xn)" },
+    { key: "f2", label: "f(xn + δ·xn)" },
     { key: "error", label: "error" },
   ],
 };
 
+function columnsFor(method: Method, firstStep: Step | undefined): Column[] {
+  const first = SCALAR_COLUMNS[method];
+  if (first) return first;
+
+  // Dynamic columns for the matrix methods, derived from the step keys.
+  const valueKeys = Object.keys(firstStep ?? {})
+    .filter((k) => /^v\d+$/.test(k))
+    .sort((x, y) => Number(x.slice(1)) - Number(y.slice(1)));
+
+  if (method === "gauss_elimination") {
+    return [
+      { key: "i", label: "i" },
+      { key: "op", label: "operation", text: true },
+      ...valueKeys.map((k, idx) => ({
+        key: k,
+        label: idx === valueKeys.length - 1 ? "b" : `c${idx + 1}`,
+      })),
+    ];
+  }
+  // gauss_seidel
+  return [
+    { key: "i", label: "i" },
+    ...valueKeys.map((k, idx) => ({ key: k, label: `x${idx + 1}` })),
+    { key: "error", label: "error" },
+  ];
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const SYSTEM_PLACEHOLDER = "4 3 0 120\n3 4 -1 127.4\n0 -1 4 91.5";
 
 function fmt(v: number): string {
   if (!Number.isFinite(v)) return "—";
@@ -76,13 +93,20 @@ function fmt(v: number): string {
   return String(parseFloat(v.toPrecision(6)));
 }
 
+function fmtCell(v: number | string | undefined): string {
+  if (typeof v === "string") return v;
+  return typeof v === "number" ? fmt(v) : "—";
+}
+
 export default function Home() {
   const [method, setMethod] = useState<Method>("bisection");
   const [equation, setEquation] = useState("");
+  const [system, setSystem] = useState("");
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const [x0, setX0] = useState("");
   const [x1, setX1] = useState("");
+  const [delta, setDelta] = useState("0.01");
   const [tolerance, setTolerance] = useState("0.0001");
   const [maxIterations, setMaxIterations] = useState("50");
 
@@ -92,17 +116,23 @@ export default function Home() {
   const [result, setResult] = useState<SolveResult | null>(null);
   const [showSteps, setShowSteps] = useState(true);
 
-  const needsInterval = method === "bisection" || method === "false_position";
-  const needsX0 = method === "newton" || method === "fixed_point";
-  const needsX1 = method === "secant";
+  const isMatrix = method === "gauss_elimination" || method === "gauss_seidel";
+  const needsInterval = method === "bisection";
+  const needsX0 = method === "modified_secant";
+  const needsX0X1 = method === "secant";
+  const needsDelta = method === "modified_secant";
+  const needsTolerance = method !== "gauss_elimination";
+  const needsMaxIterations = method !== "gauss_elimination";
 
   function clear() {
     setMethod("bisection");
     setEquation("");
+    setSystem("");
     setA("");
     setB("");
     setX0("");
     setX1("");
+    setDelta("0.01");
     setTolerance("0.0001");
     setMaxIterations("50");
     setFieldErrors({});
@@ -111,10 +141,47 @@ export default function Home() {
     setShowSteps(true);
   }
 
+  function parseSystem(): number[][] | null {
+    const lines = system
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+    if (lines.length === 0) {
+      setFieldErrors({ system: "Enter the system, one row per line" });
+      return null;
+    }
+    const rows: number[][] = [];
+    for (const line of lines) {
+      const numbers = line
+        .split(/[\s,;]+/)
+        .filter(Boolean)
+        .map(Number);
+      if (numbers.some((v) => !Number.isFinite(v))) {
+        setFieldErrors({ system: `Row "${line}" contains an invalid number` });
+        return null;
+      }
+      rows.push(numbers);
+    }
+    const n = rows.length;
+    for (const row of rows) {
+      if (row.length !== n + 1) {
+        setFieldErrors({
+          system: `The system must be square: each row needs ${n} coefficients plus 1 right-hand-side value (${n + 1} numbers per line)`,
+        });
+        return null;
+      }
+    }
+    return rows;
+  }
+
   function validate(): boolean {
     const errors: Record<string, string> = {};
 
-    if (!equation.trim()) {
+    if (isMatrix) {
+      if (system.trim() === "") {
+        errors.system = "The system cannot be empty";
+      }
+    } else if (!equation.trim()) {
       errors.equation = "The equation cannot be empty";
     }
 
@@ -133,56 +200,72 @@ export default function Home() {
       errors.x0 = "Enter a valid number for x0";
     }
 
-    if (needsX1 && (x1.trim() === "" || !Number.isFinite(Number(x1)))) {
-      errors.x1 = "Enter a valid number for x1";
+    if (needsX0X1) {
+      if (x0.trim() === "" || !Number.isFinite(Number(x0))) {
+        errors.x0 = "Enter a valid number for x0";
+      }
+      if (x1.trim() === "" || !Number.isFinite(Number(x1))) {
+        errors.x1 = "Enter a valid number for x1";
+      }
     }
 
-    if (tolerance.trim() === "" || !Number.isFinite(Number(tolerance)) || Number(tolerance) <= 0) {
+    if (needsDelta && (delta.trim() === "" || !Number.isFinite(Number(delta)) || Number(delta) <= 0)) {
+      errors.delta = "Delta must be greater than 0";
+    }
+
+    if (
+      needsTolerance &&
+      (tolerance.trim() === "" || !Number.isFinite(Number(tolerance)) || Number(tolerance) <= 0)
+    ) {
       errors.tolerance = "Tolerance must be greater than 0";
     }
 
     const maxIt = Number(maxIterations);
     if (
-      maxIterations.trim() === "" ||
-      !Number.isInteger(maxIt) ||
-      maxIt <= 0
+      needsMaxIterations &&
+      (maxIterations.trim() === "" || !Number.isInteger(maxIt) || maxIt <= 0)
     ) {
       errors.maxIterations = "Max iterations must be a positive integer";
     }
 
     setFieldErrors(errors);
+    if (isMatrix && !errors.system) {
+      // Parse the matrix so the exact shape error (if any) can be shown too.
+      if (parseSystem() === null) return false;
+    }
     return Object.keys(errors).length === 0;
   }
 
   async function solve() {
     setServerError(null);
-    if (!validate()) {
-      return;
-    }
+    if (!validate()) return;
 
     setLoading(true);
     setResult(null);
 
-    const params: Record<string, number> = {
-      tolerance: Number(tolerance),
-      max_iterations: Number(maxIterations),
-    };
+    const params: Record<string, number> = {};
     if (needsInterval) {
       params.a = Number(a);
       params.b = Number(b);
     }
-    if (needsX0) {
-      params.x0 = Number(x0);
-    }
-    if (needsX1) {
-      params.x1 = Number(x1);
+    if (needsX0 || needsX0X1) params.x0 = Number(x0);
+    if (needsX0X1) params.x1 = Number(x1);
+    if (needsDelta) params.delta = Number(delta);
+    if (needsTolerance) params.tolerance = Number(tolerance);
+    if (needsMaxIterations) params.max_iterations = Number(maxIterations);
+
+    const body: Record<string, unknown> = { method, params };
+    if (isMatrix) {
+      body.system = parseSystem();
+    } else {
+      body.equation = equation;
     }
 
     try {
       const res = await fetch(`${API_URL}/api/solve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method, equation, params }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -201,7 +284,7 @@ export default function Home() {
   }
 
   function renderField(
-    key: "a" | "b" | "x0" | "x1" | "tolerance" | "maxIterations",
+    key: "a" | "b" | "x0" | "x1" | "delta" | "tolerance" | "maxIterations",
     label: string,
     value: string,
     setValue: (v: string) => void,
@@ -223,13 +306,15 @@ export default function Home() {
     );
   }
 
+  const columns = result ? columnsFor(result.method, result.steps[0]) : [];
+
   return (
     <div className={styles.page}>
       <main className={styles.main}>
         {/* Header */}
         <header className={styles.header}>
           <h1 className={styles.title}>Numerical Equation Solver</h1>
-          <p className={styles.subtitle}>Choose a method, enter your equation, and get the root.</p>
+          <p className={styles.subtitle}>Choose a method, enter your equation, and get the result.</p>
         </header>
 
         {/* Form */}
@@ -252,23 +337,44 @@ export default function Home() {
             </select>
           </label>
 
-          <label className={`${styles.field} ${styles.fieldWide}`}>
-            <span className={styles.fieldLabel}>Equation f(x) =</span>
-            <input
-              type="text"
-              dir="ltr"
-              placeholder="x^3 - x - 2"
-              className={`${styles.input} ${styles.equationInput} ${fieldErrors.equation ? styles.inputError : ""}`}
-              value={equation}
-              onChange={(e) => setEquation(e.target.value)}
-            />
-            <span className={styles.helpText}>
-              Use x as the variable, ^ for powers, and functions like sin(x), cos(x), exp(x), log(x).
-            </span>
-            {fieldErrors.equation && (
-              <span className={styles.fieldError}>{fieldErrors.equation}</span>
-            )}
-          </label>
+          {!isMatrix && (
+            <label className={`${styles.field} ${styles.fieldWide}`}>
+              <span className={styles.fieldLabel}>Equation f(x) =</span>
+              <input
+                type="text"
+                dir="ltr"
+                placeholder="x^3 - x - 2"
+                className={`${styles.input} ${styles.equationInput} ${fieldErrors.equation ? styles.inputError : ""}`}
+                value={equation}
+                onChange={(e) => setEquation(e.target.value)}
+              />
+              <span className={styles.helpText}>
+                Use x as the variable, ^ for powers, and functions like sin(x), cos(x), exp(x), log(x).
+              </span>
+              {fieldErrors.equation && (
+                <span className={styles.fieldError}>{fieldErrors.equation}</span>
+              )}
+            </label>
+          )}
+
+          {isMatrix && (
+            <label className={`${styles.field} ${styles.fieldWide}`}>
+              <span className={styles.fieldLabel}>System Ax = b</span>
+              <textarea
+                dir="ltr"
+                rows={3}
+                placeholder={SYSTEM_PLACEHOLDER}
+                className={`${styles.input} ${styles.systemInput} ${fieldErrors.system ? styles.inputError : ""}`}
+                value={system}
+                onChange={(e) => setSystem(e.target.value)}
+              />
+              <span className={styles.helpText}>
+                One row per line: the coefficients followed by the right-hand side, separated by
+                spaces. Example above: 3 equations in 3 unknowns.
+              </span>
+              {fieldErrors.system && <span className={styles.fieldError}>{fieldErrors.system}</span>}
+            </label>
+          )}
 
           <div className={styles.fieldGrid}>
             {needsInterval && (
@@ -277,10 +383,12 @@ export default function Home() {
                 {renderField("b", "b (interval end)", b, setB)}
               </>
             )}
-            {(needsX0 || needsX1) && renderField("x0", "x0 (first guess)", x0, setX0)}
-            {needsX1 && renderField("x1", "x1 (second guess)", x1, setX1)}
-            {renderField("tolerance", "Tolerance", tolerance, setTolerance)}
-            {renderField("maxIterations", "Max iterations", maxIterations, setMaxIterations, "1")}
+            {(needsX0 || needsX0X1) && renderField("x0", "x0 (first guess)", x0, setX0)}
+            {needsX0X1 && renderField("x1", "x1 (second guess)", x1, setX1)}
+            {needsDelta && renderField("delta", "Delta (δ)", delta, setDelta)}
+            {needsTolerance && renderField("tolerance", "Tolerance", tolerance, setTolerance)}
+            {needsMaxIterations &&
+              renderField("maxIterations", "Max iterations", maxIterations, setMaxIterations, "1")}
           </div>
 
           <div className={styles.actions}>
@@ -306,18 +414,32 @@ export default function Home() {
           <>
             <section className={styles.card}>
               <div className={styles.resultGrid}>
+                {result.root !== null && (
+                  <div className={styles.metric}>
+                    <span className={styles.metricLabel}>Approximate root</span>
+                    <span className={styles.metricValue}>{fmt(result.root)}</span>
+                  </div>
+                )}
+                {result.solution !== null && (
+                  <div className={`${styles.metric} ${styles.metricWide}`}>
+                    <span className={styles.metricLabel}>Solution</span>
+                    <span className={styles.metricValue} dir="ltr">
+                      {result.solution.map((v) => fmt(v)).join(" , ")}
+                    </span>
+                  </div>
+                )}
                 <div className={styles.metric}>
-                  <span className={styles.metricLabel}>Approximate root</span>
-                  <span className={styles.metricValue}>{fmt(result.root)}</span>
-                </div>
-                <div className={styles.metric}>
-                  <span className={styles.metricLabel}>Number of iterations</span>
+                  <span className={styles.metricLabel}>
+                    {method === "gauss_elimination" ? "Operations" : "Number of iterations"}
+                  </span>
                   <span className={styles.metricValue}>{result.iterations}</span>
                 </div>
-                <div className={styles.metric}>
-                  <span className={styles.metricLabel}>Final error</span>
-                  <span className={styles.metricValue}>{fmt(result.error)}</span>
-                </div>
+                {method !== "gauss_elimination" && (
+                  <div className={styles.metric}>
+                    <span className={styles.metricLabel}>Final error</span>
+                    <span className={styles.metricValue}>{fmt(result.error)}</span>
+                  </div>
+                )}
                 <div className={styles.metric}>
                   <span className={styles.metricLabel}>Method used</span>
                   <span className={styles.metricValue}>
@@ -326,7 +448,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <Plot graph={result.graph} />
+              {result.graph && <Plot graph={result.graph} />}
             </section>
 
             {/* Steps table */}
@@ -343,7 +465,7 @@ export default function Home() {
                   <table className={styles.table}>
                     <thead>
                       <tr>
-                        {COLUMNS[result.method].map((col) => (
+                        {columns.map((col) => (
                           <th key={col.key}>{col.label}</th>
                         ))}
                       </tr>
@@ -351,8 +473,14 @@ export default function Home() {
                     <tbody>
                       {result.steps.map((step, i) => (
                         <tr key={i}>
-                          {COLUMNS[result.method].map((col) => (
-                            <td key={col.key}>{fmt(step[col.key])}</td>
+                          {columns.map((col) => (
+                            <td
+                              key={col.key}
+                              className={col.text ? styles.cellText : undefined}
+                              dir={col.text ? "ltr" : undefined}
+                            >
+                              {fmtCell(step[col.key])}
+                            </td>
                           ))}
                         </tr>
                       ))}

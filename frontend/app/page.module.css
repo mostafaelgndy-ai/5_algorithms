@@ -156,6 +156,13 @@
   width: 100%;
 }
 
+.systemInput {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  white-space: pre;
+}
+
 .fieldGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -277,6 +284,14 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+.metricWide {
+  grid-column: 1 / -1;
+}
+
+.cellText {
+  text-align: left !important;
 }
 
 /* ------------------------------------------------------------------ */

@@ -184,7 +184,7 @@ def make_function(equation: str):
 # Request / response models
 # ---------------------------------------------------------------------------
 
-Method = Literal["bisection", "false_position", "newton", "secant", "fixed_point"]
+Method = Literal["bisection", "gauss_elimination", "gauss_seidel", "secant", "modified_secant"]
 
 
 class Params(BaseModel):
@@ -192,13 +192,15 @@ class Params(BaseModel):
     b: Optional[float] = None
     x0: Optional[float] = None
     x1: Optional[float] = None
+    delta: Optional[float] = None
     tolerance: float = Field(default=1e-4, gt=0)
     max_iterations: int = Field(default=50, ge=1, le=10000)
 
 
 class SolveRequest(BaseModel):
     method: Method
-    equation: str
+    equation: Optional[str] = None
+    system: Optional[list[list[float]]] = None
     params: Params
 
 
@@ -209,13 +211,14 @@ class GraphData(BaseModel):
 
 class SolveResponse(BaseModel):
     method: Method
-    equation: str
-    root: float
+    equation: Optional[str] = None
+    root: Optional[float] = None
+    solution: Optional[list[float]] = None
     iterations: int
     error: float
     converged: bool
-    steps: list[dict[str, float | int]]
-    graph: GraphData
+    steps: list[dict[str, Any]]
+    graph: Optional[GraphData] = None
 
 
 # ---------------------------------------------------------------------------
@@ -232,12 +235,6 @@ def _finite(value: float) -> float:
     if math.isnan(value) or math.isinf(value):
         raise SolverError("f(x) is undefined at some evaluated point, check the interval")
     return value
-
-
-def _derivative(f, x: float) -> float:
-    """Central finite-difference derivative of f at x."""
-    h = 1e-7 * max(1.0, abs(x))
-    return (f(x + h) - f(x - h)) / (2.0 * h)
 
 
 def _graph_points(f, root: float, a: Optional[float], b: Optional[float]) -> GraphData:
@@ -289,55 +286,6 @@ def _bisection(f, a: float, b: float, tol: float, max_iter: int):
     raise SolverError("Tolerance was not reached within the maximum number of iterations")
 
 
-def _false_position(f, a: float, b: float, tol: float, max_iter: int):
-    fa, fb = _finite(f(a)), _finite(f(b))
-    if fa == 0:
-        return {"root": a, "steps": [], "iterations": 0}
-    if fb == 0:
-        return {"root": b, "steps": [], "iterations": 0}
-    if fa * fb > 0:
-        raise SolverError("No root exists in the given interval (f(a) and f(b) have the same sign)")
-
-    steps: list[dict[str, float | int]] = []
-    c_prev: Optional[float] = None
-    for i in range(1, max_iter + 1):
-        if fb - fa == 0:
-            raise SolverError("Division by zero in the interpolation formula")
-        c = (a * fb - b * fa) / (fb - fa)
-        fc = _finite(f(c))
-        err = abs(c - c_prev) if c_prev is not None else abs(b - a)
-        steps.append({"i": i, "a": a, "b": b, "c": c, "fc": fc, "error": err})
-        c_prev = c
-        if abs(fc) < tol or err < tol or fc == 0:
-            return {"root": c, "steps": steps, "iterations": i}
-        if fa * fc < 0:
-            b, fb = c, fc
-        else:
-            a, fa = c, fc
-    raise SolverError("Tolerance was not reached within the maximum number of iterations")
-
-
-def _newton(f, x0: float, tol: float, max_iter: int):
-    x = x0
-    steps: list[dict[str, float | int]] = []
-    for i in range(1, max_iter + 1):
-        fx = _finite(f(x))
-        dfx = _finite(_derivative(f, x))
-        if dfx == 0:
-            raise SolverError("The derivative equals zero")
-        if abs(dfx) < 1e-14 * max(1.0, abs(fx)):
-            raise SolverError("The derivative is too small to continue (near a horizontal tangent)")
-        nx = x - fx / dfx
-        err = abs(nx - x)
-        steps.append({"i": i, "xn": x, "fxn": fx, "dfxn": dfx, "error": err})
-        x = nx
-        if not math.isfinite(x) or abs(x) > 1e100:
-            raise SolverError("Newton-Raphson diverged, the initial guess may be unsuitable")
-        if err < tol or fx == 0:
-            return {"root": x, "steps": steps, "iterations": i}
-    raise SolverError("Tolerance was not reached within the maximum number of iterations")
-
-
 def _secant(f, x0: float, x1: float, tol: float, max_iter: int):
     prev, cur = x0, x1
     fprev, fcur = _finite(f(prev)), _finite(f(cur))
@@ -358,19 +306,111 @@ def _secant(f, x0: float, x1: float, tol: float, max_iter: int):
     raise SolverError("Tolerance was not reached within the maximum number of iterations")
 
 
-def _fixed_point(f, x0: float, tol: float, max_iter: int):
-    """Fixed-point iteration using g(x) = x - f(x), i.e. x_next = x - f(x)."""
+# ---------------------------------------------------------------------------
+# Linear-system solvers (Ax = b)
+# ---------------------------------------------------------------------------
+
+
+def _parse_system(system: list[list[float]]) -> list[list[float]]:
+    """Validate the augmented matrix; each row must have n coefficients + 1 RHS."""
+    rows = len(system)
+    if rows == 0:
+        raise SolverError("The system is empty")
+    for row in system:
+        if len(row) != rows + 1:
+            raise SolverError(
+                "Each system row needs n coefficients plus 1 right-hand-side value "
+                "(an n x (n+1) augmented matrix)"
+            )
+    return [row[:] for row in system]
+
+
+def _gauss_elimination(matrix: list[list[float]]):
+    """Gauss Elimination with partial pivoting. Rows are appended to the steps
+    after every row operation, as operation descriptions of the form
+    `R{k+1} -> R{k+1} - factor * R{i+1}`."""
+    aug = matrix
+    n = len(aug)
+    steps: list[dict[str, Any]] = []
+
+    def snapshot(op: str, row_index: int):
+        entry: dict[str, Any] = {"i": len(steps) + 1, "op": op}
+        for j in range(n + 1):
+            entry[f"v{j}"] = round(aug[row_index][j], 8)
+        steps.append(entry)
+
+    for i in range(n):
+        # Partial pivoting: move the largest coefficient in column i to the pivot.
+        pivot_row = max(range(i, n), key=lambda r: abs(aug[r][i]))
+        if abs(aug[pivot_row][i]) < 1e-300:
+            raise SolverError("The matrix is singular, Gauss Elimination cannot solve this system")
+        if pivot_row != i:
+            aug[i], aug[pivot_row] = aug[pivot_row], aug[i]
+            snapshot(f"R{i + 1} <-> R{pivot_row + 1}", i)
+        for k in range(i + 1, n):
+            factor = aug[k][i] / aug[i][i]
+            if factor == 0:
+                continue
+            for j in range(i, n + 1):
+                aug[k][j] -= factor * aug[i][j]
+            snapshot(f"R{k + 1} -> R{k + 1} - {factor:.6g}R{i + 1}", k)
+
+    # Back substitution
+    solution = [0.0] * n
+    for i in range(n - 1, -1, -1):
+        rhs = aug[i][n] - sum(aug[i][j] * solution[j] for j in range(i + 1, n))
+        solution[i] = rhs / aug[i][i]
+
+    return {"solution": solution, "steps": steps, "iterations": len(steps)}
+
+
+def _gauss_seidel(matrix: list[list[float]], tol: float, max_iter: int):
+    """Gauss-Seidel: iterate x_i <- (b_i - sum_{j != i} A[i][j] * x_j) / A[i][i],
+    using updated values as soon as they are available."""
+    n = len(matrix)
+    A = [row[:n] for row in matrix]
+    b = [row[n] for row in matrix]
+    if any(abs(A[i][i]) < 1e-300 for i in range(n)):
+        raise SolverError(
+            "A zero element on the diagonal, Gauss-Seidel cannot solve this system"
+        )
+    x = [0.0] * n
+    steps: list[dict[str, Any]] = []
+    for it in range(1, max_iter + 1):
+        x_old = x[:]
+        for i in range(n):
+            s = b[i] - sum(A[i][j] * x[j] for j in range(n) if j != i)
+            x[i] = s / A[i][i]
+        err = max(abs(x[i] - x_old[i]) for i in range(n))
+        entry: dict[str, Any] = {"i": it}
+        for k in range(n):
+            entry[f"v{k}"] = round(x[k], 8)
+        entry["error"] = err
+        steps.append(entry)
+        if err < tol:
+            return {"solution": x, "steps": steps, "iterations": it}
+    raise SolverError("Tolerance was not reached within the maximum number of iterations")
+
+
+def _modified_secant(f, x0: float, delta: float, tol: float, max_iter: int):
+    """Modified secant: x_{k+1} = x_k - delta * x_k * f(x_k)
+    / (f(x_k + delta * x_k) - f(x_k))."""
     x = x0
     steps: list[dict[str, float | int]] = []
     for i in range(1, max_iter + 1):
         fx = _finite(f(x))
-        err = abs(fx)
-        nxt = x - fx
-        if not math.isfinite(nxt) or abs(nxt) > 1e100:
-            raise SolverError("Fixed Point iteration diverged, try another initial guess")
-        steps.append({"i": i, "xn": x, "xnext": nxt, "fxn": fx, "error": err})
-        x = nxt
-        if err < tol:
+        xpert = x + delta * x
+        fxp = _finite(f(xpert))
+        denom = fxp - fx
+        if denom == 0:
+            raise SolverError("The modified secant reached a zero denominator (two equal function values)")
+        nx = x - delta * x * fx / denom
+        if not math.isfinite(nx) or abs(nx) > 1e100:
+            raise SolverError("The modified secant diverged, the initial guess or delta may be unsuitable")
+        err = abs(nx - x)
+        steps.append({"i": i, "xn": x, "fxn": fx, "f2": fxp, "error": err})
+        x = nx
+        if err < tol or fx == 0:
             return {"root": x, "steps": steps, "iterations": i}
     raise SolverError("Tolerance was not reached within the maximum number of iterations")
 
@@ -383,12 +423,21 @@ def _fixed_point(f, x0: float, tol: float, max_iter: int):
 @app.post("/api/solve", response_model=SolveResponse)
 def solve(req: SolveRequest) -> dict[str, Any]:
     p = req.params
-    try:
-        f = make_function(req.equation)
-    except InvalidEquation as exc:
-        raise SolverError(f"Invalid equation: {exc}")
-
     method = req.method
+    numeric_methods = ("bisection", "secant", "modified_secant")
+
+    if method in numeric_methods:
+        if not req.equation:
+            raise SolverError("An equation f(x) is required for this method")
+        try:
+            f = make_function(req.equation)
+        except InvalidEquation as exc:
+            raise SolverError(f"Invalid equation: {exc}")
+    else:
+        if req.system is None:
+            raise SolverError("This method requires the system matrix (n rows, each with n coefficients + 1 RHS)")
+        system = _parse_system(req.system)
+
     try:
         if method == "bisection":
             if p.a is None or p.b is None:
@@ -396,35 +445,30 @@ def solve(req: SolveRequest) -> dict[str, Any]:
             if p.a >= p.b:
                 raise SolverError("Interval start a must be less than b")
             res = _bisection(f, p.a, p.b, p.tolerance, p.max_iterations)
-        elif method == "false_position":
-            if p.a is None or p.b is None:
-                raise SolverError("False Position requires interval start (a) and end (b)")
-            if p.a >= p.b:
-                raise SolverError("Interval start a must be less than b")
-            res = _false_position(f, p.a, p.b, p.tolerance, p.max_iterations)
-        elif method == "newton":
-            if p.x0 is None:
-                raise SolverError("Newton-Raphson requires an initial guess (x0)")
-            res = _newton(f, p.x0, p.tolerance, p.max_iterations)
         elif method == "secant":
             if p.x0 is None or p.x1 is None:
-                raise SolverError("Secant requires first (x0) and second (x1) guesses")
+                raise SolverError("The secant requires first (x0) and second (x1) guesses")
             res = _secant(f, p.x0, p.x1, p.tolerance, p.max_iterations)
-        else:  # fixed_point
+        elif method == "modified_secant":
             if p.x0 is None:
-                raise SolverError("Fixed Point requires an initial guess (x0)")
-            res = _fixed_point(f, p.x0, p.tolerance, p.max_iterations)
+                raise SolverError("The modified secant requires an initial guess (x0)")
+            res = _modified_secant(f, p.x0, p.delta or 0.01, p.tolerance, p.max_iterations)
+        elif method == "gauss_elimination":
+            res = _gauss_elimination(system)
+        else:  # gauss_seidel
+            res = _gauss_seidel(system, p.tolerance, p.max_iterations)
     except OverflowError:
-        raise SolverError("The calculation overflowed, check the equation and inputs")
+        raise SolverError("The calculation overflowed, check the inputs")
 
-    graph = _graph_points(f, float(res["root"]), p.a, p.b)
+    graph = _graph_points(f, float(res["root"]), p.a, p.b) if method in numeric_methods else None
 
     return {
         "method": method,
         "equation": req.equation,
-        "root": float(res["root"]),
+        "root": float(res["root"]) if "root" in res else None,
+        "solution": res.get("solution"),
         "iterations": int(res["iterations"]),
-        "error": float(res["steps"][-1]["error"]) if res["steps"] else 0.0,
+        "error": float(res["steps"][-1]["error"]) if res["steps"] and "error" in res["steps"][-1] else 0.0,
         "converged": True,
         "steps": res["steps"],
         "graph": graph,
