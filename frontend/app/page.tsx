@@ -77,6 +77,18 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const SYSTEM_PLACEHOLDER = "4 3 0 120\n3 4 -1 127.4\n0 -1 4 91.5";
 
+const FORMULAS: Record<Method, string> = {
+  bisection: "c = (a + b) / 2 — keep the half where f(a) · f(c) < 0",
+  gauss_jacobi:
+    "xᵢ⁽ᵏ⁺¹⁾ = ( bᵢ − Σ_{j≠i} aᵢⱼ · xⱼ⁽ᵏ⁾ ) / aᵢᵢ   — every x uses the previous iteration's values",
+  gauss_seidel:
+    "xᵢ⁽ᵏ⁺¹⁾ = ( bᵢ − Σ_{j≠i} aᵢⱼ · xⱼ ) / aᵢᵢ   — updated values (j < i) are used immediately",
+  secant:
+    "x₍ₖ₊₁₎ = xₖ − f(xₖ) · ( xₖ − x₍ₖ₋₁₎ ) / ( f(xₖ) − f(x₍ₖ₋₁₎) )",
+  modified_secant:
+    "x₍ₖ₊₁₎ = xₖ − δ · xₖ · f(xₖ) / ( f(xₖ + δ · xₖ) − f(xₖ) )",
+};
+
 function fmt(v: number): string {
   if (!Number.isFinite(v)) return "—";
   if (v === 0) return "0";
@@ -365,6 +377,11 @@ export default function Home() {
               {fieldErrors.system && <span className={styles.fieldError}>{fieldErrors.system}</span>}
             </label>
           )}
+
+          <div className={styles.formulaBox}>
+            <span className={styles.formulaLabel}>Iteration function</span>
+            <code dir="ltr">{FORMULAS[method]}</code>
+          </div>
 
           <div className={styles.fieldGrid}>
             {needsInterval && (
