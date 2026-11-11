@@ -1,5 +1,4 @@
-"""Modified secant method: x_{k+1} = x_k - delta * x_k * f(x_k)
-/ (f(x_k + delta * x_k) - f(x_k))."""
+"""Modified secant method: x_{k+1} = x_k - delta * x_k * f(x_k)/ (f(x_k + delta * x_k) - f(x_k))."""
 
 from __future__ import annotations
 
