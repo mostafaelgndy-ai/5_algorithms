@@ -365,8 +365,8 @@ export default function Home() {
           <div className={styles.fieldGrid}>
             {needsInterval && (
               <>
-                {renderField("a", "a (interval start)", a, setA)}
-                {renderField("b", "b (interval end)", b, setB)}
+                {renderField("a", "X_Lower", a, setA)}
+                {renderField("b", "X_Upper", b, setB)}
               </>
             )}
             {(needsX0 || needsX0X1) && renderField("x0", "x0 (first guess)", x0, setX0)}

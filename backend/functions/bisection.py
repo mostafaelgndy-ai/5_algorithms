@@ -16,7 +16,7 @@ def bisection(f, a: float, b: float, tol: float, max_iter: int) -> dict[str, Any
     if fa * fb > 0:
         raise SolverError("No root exists in the given interval (f(a) and f(b) have the same sign)")
 
-    steps: list[dict[str, float | int]] = []
+    steps = []
     for i in range(1, max_iter + 1):
         c = (a + b) / 2
         fc = finite(f(c))

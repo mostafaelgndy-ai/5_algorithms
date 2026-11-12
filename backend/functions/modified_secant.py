@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import math
 
 from .common import SolverError, finite
 
 
-def modified_secant(f, x0: float, delta: float, tol: float, max_iter: int) -> dict[str, Any]:
+def modified_secant(f, x0, delta, tol, max_iter):
     x = x0
     steps: list[dict[str, float | int]] = []
     for i in range(1, max_iter + 1):
