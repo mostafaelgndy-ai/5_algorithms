@@ -9,9 +9,11 @@ bonus web UI (Next.js) that talks to a Python FastAPI backend.
 - Enter any equation in `x` — powers with `^`, functions like `sin`, `cos`, `exp`, `log`.
   Unicode lookalikes (pasted minus signs, `x²`-style superscripts, `×`, `÷`) are normalized automatically.
 - Pick a method from a dropdown; the required fields change with it.
-- The Gauss methods accept a linear system typed as matrix rows in a text area.
+- The Gauss-Jacobi method accepts a linear system typed as matrix rows in a text area.
+- Linear regression accepts `(x, y)` data points typed one pair per line and
+  returns the fitted line, slope, intercept and R².
 - Client-side validation before the request is sent (interval order, positive
-  tolerance, positive integer max iterations, square system, etc.).
+  tolerance, positive integer max iterations, square system, data pairs, etc.).
 - Result card: approximate root / solution vector, number of iterations
   (or operations), final error, method used.
 - Collapsible steps table with one row per iteration (columns depend on the method).
@@ -25,7 +27,7 @@ bonus web UI (Next.js) that talks to a Python FastAPI backend.
 | ------------------------ | ---------------------------------------------- | --------------------- |
 | Bisection Method         | interval start `a`, end `b`                    | `bisection`           |
 | Gauss-Jacobi Iteration   | system `Ax = b` + tolerance + max iterations   | `gauss_jacobi`        |
-| Gauss-Seidel Iteration   | system `Ax = b` + tolerance + max iterations   | `gauss_seidel`        |
+| Linear Regression        | data points `(x, y)`                           | `linear_regression`   |
 | Secant Method            | first guess `x0`, second `x1`                  | `secant`              |
 | Modified Secant Method   | initial guess `x0`, perturbation delta         | `modified_secant`     |
 
@@ -33,6 +35,8 @@ bonus web UI (Next.js) that talks to a Python FastAPI backend.
 Convergence criteria: `|x_new − x_old| < tolerance` (or `|f(x)| < tolerance`)
 within `max_iterations`; otherwise the backend answers with
 `"Tolerance was not reached within the maximum number of iterations"`.
+Linear regression is not iterative: it computes the least-squares fit directly
+from the data points.
 
 ## Project structure
 
@@ -48,7 +52,7 @@ within `max_iterations`; otherwise the backend answers with
 │   │   ├── secant.py
 │   │   ├── modified_secant.py
 │   │   ├── gauss_jacobi.py
-│   │   ├── gauss_seidel.py
+│   │   ├── linear_regression.py
 │   │   ├── equation.py   # safe f(x) parsing (AST, ^ as power)
 │   │   ├── matrix.py     # augmented-matrix validation/split helpers
 │   │   └── common.py     # SolverError + finite() check
@@ -99,15 +103,26 @@ Request (linear system):
 
 ```json
 {
-  "method": "gauss_seidel",
+  "method": "gauss_jacobi",
   "system": [[4, 3, 0, 120], [3, 4, -1, 127.4], [0, -1, 4, 91.5]],
   "params": { "tolerance": 0.0001, "max_iterations": 50 }
+}
+```
+
+Request (linear regression):
+
+```json
+{
+  "method": "linear_regression",
+  "data": [[1, 2], [2, 4], [3, 5], [4, 4]],
+  "params": {}
 }
 ```
 
 Params are method-dependent: `a`, `b` for Bisection; `x0`, `x1` for Secant;
 `x0` and `delta` (default `0.01`) for Modified Secant; `tolerance`
 (default `0.0001`) and `max_iterations` (default `50`) where applicable.
+Linear regression does not use these params.
 
 Success response:
 
@@ -127,8 +142,36 @@ Success response:
 }
 ```
 
-For the Gauss methods the response has `solution` (the x vector) instead of
+For Gauss-Jacobi the response has `solution` (the x vector) instead of
 `root`, and no `graph`.
+
+Linear regression response:
+
+```json
+{
+  "method": "linear_regression",
+  "coefficients": [2.0, 0.7],
+  "r2": 0.515789,
+  "n_points": 4,
+  "iterations": 0,
+  "error": 0.758288,
+  "converged": true,
+  "steps": [
+    { "i": 1, "x": 1, "y": 2, "yhat": 2.7, "residual": -0.7 },
+    ...
+  ],
+  "graph": {
+    "root": null,
+    "points": [],
+    "scatter": [[1, 2], [2, 4], [3, 5], [4, 4]],
+    "line": [[1, 2.7], [4, 4.8]]
+  }
+}
+```
+
+`coefficients` is `[intercept, slope]` for the fitted line `y = a + b·x`, and
+`error` is the root-mean-square error (RMSE). `iterations` is `0` because the
+fit is computed directly; `n_points` is the number of data points.
 
 Step column keys by method:
 
@@ -136,7 +179,7 @@ Step column keys by method:
 - Secant: `i, xnm1, xn, xnp1, fxn, error`
 - Modified Secant: `i, xn, fxn, f2, error`
 - Gauss-Jacobi: `i, v0.., error` (`v0..v{n-1}` are `x1..xn`)
-- Gauss-Seidel: `i, v0.., error` (`v0..v{n-1}` are `x1..xn`)
+- Linear Regression: `i, x, y, ŷ, residual`
 
 Failure (HTTP 400):
 
@@ -148,19 +191,26 @@ The UI shows the `message` from the backend in a red box. Server messages includ
 
 - `No root exists in the given interval (f(a) and f(b) have the same sign)`
 - `Invalid equation: ...`
-- `A zero element on the diagonal, Gauss-Jacobi/Gauss-Seidel cannot solve this system`
+- `A zero element on the diagonal, Gauss-Jacobi cannot solve this system`
 - `Tolerance was not reached within the maximum number of iterations`
 - divergence / zero-denominator messages for Secant and Modified Secant
+- `Linear regression requires at least 2 data points`
+- `Each data row must contain exactly 2 numbers: x and y`
+- `Linear regression requires at least two different x values`
 
 If the request never reaches the server (network error), the UI shows
 *"Could not reach the server, please try again"*.
 
-Example with curl:
+Examples with curl:
 
 ```bash
 curl -X POST http://localhost:8000/api/solve \
   -H "Content-Type: application/json" \
   -d '{"method": "modified_secant", "equation": "x^3 - x - 2", "params": {"x0": 1.5, "delta": 0.01}}'
+
+curl -X POST http://localhost:8000/api/solve \
+  -H "Content-Type: application/json" \
+  -d '{"method": "linear_regression", "data": [[1, 2], [2, 4], [3, 5], [4, 4]], "params": {}}'
 ```
 
 ### Supported equation syntax
@@ -175,14 +225,14 @@ so only a safe subset is allowed:
 
 Examples: `x^3 - x - 2`, `x - cos(x)`, `exp(x) - 3`, `x^2 - 4*sin(x)`.
 
-## How the iterations are computed
+## How the methods are computed
 
 - **Bisection**: repeatedly bisect `[a, b]`, keep the half where the sign of
   `f` changes. Error per row is `|b − a| / 2`.
 - **Gauss-Jacobi**: `x_i^(k+1) = (b_i − Σ_{j≠i} A[i][j]·x_j^(k)) / A[i][i]`,
   computing every new value from the previous iteration only.
-- **Gauss-Seidel**: `x_i ← (b_i − Σ_{j≠i} A[i][j]·x_j) / A[i][i]`, using updated
-  values immediately; stops when the max change is below the tolerance.
+- **Linear Regression**: `b = Σ(x − x̄)(y − ȳ) / Σ(x − x̄)²` and
+  `a = ȳ − b·x̄`, giving the least-squares line `y = a + b·x`.
 - **Secant**: `x_{k+1} = x_k − f(x_k)·(x_k − x_{k-1}) / (f(x_k) − f(x_{k-1}))`.
 - **Modified Secant**: `x_{k+1} = x_k − δ·x_k·f(x_k) / (f(x_k + δ·x_k) − f(x_k))`
   with δ (default `0.01`) from the Delta field.

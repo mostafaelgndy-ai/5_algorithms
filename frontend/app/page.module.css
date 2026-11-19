@@ -329,6 +329,16 @@
   fill: var(--root);
 }
 
+.scatterDot {
+  fill: var(--text);
+}
+
+.fitLine {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
 /* ------------------------------------------------------------------ */
 /* Steps table                                                         */
 

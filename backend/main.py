@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from functions.common import SolverError
 from functions.equation import InvalidEquation, make_function
 from functions.gauss_jacobi import gauss_jacobi
-from functions.gauss_seidel import gauss_seidel
+from functions.linear_regression import linear_regression
 from functions.matrix import parse_system
 from functions.bisection import bisection
 from functions.modified_secant import modified_secant
@@ -46,7 +46,7 @@ def health():
 # Request / response models
 # ---------------------------------------------------------------------------
 
-Method = Literal["bisection", "gauss_jacobi", "gauss_seidel", "secant", "modified_secant"]
+Method = Literal["bisection", "gauss_jacobi", "linear_regression", "secant", "modified_secant"]
 
 
 class Params(BaseModel):
@@ -63,12 +63,15 @@ class SolveRequest(BaseModel):
     method: Method
     equation: Optional[str] = None
     system: Optional[list[list[float]]] = None
+    data: Optional[list[list[float]]] = None
     params: Params
 
 
 class GraphData(BaseModel):
-    root: float
-    points: list[list[float]]
+    root: Optional[float] = None
+    points: list[list[float]] = Field(default_factory=list)
+    scatter: Optional[list[list[float]]] = None
+    line: Optional[list[list[float]]] = None
 
 
 class SolveResponse(BaseModel):
@@ -76,6 +79,9 @@ class SolveResponse(BaseModel):
     equation: Optional[str] = None
     root: Optional[float] = None
     solution: Optional[list[float]] = None
+    coefficients: Optional[list[float]] = None
+    r2: Optional[float] = None
+    n_points: Optional[int] = None
     iterations: int
     error: float
     converged: bool
@@ -108,6 +114,23 @@ def _graph_points(f, root: float, a: Optional[float], b: Optional[float]) -> Gra
     return GraphData(root=round(root, 8), points=points)
 
 
+def _regression_graph(points: list[list[float]], coefficients: list[float]) -> GraphData:
+    """Scatter of the input points plus the fitted line y = a + b*x."""
+    intercept, slope = coefficients
+    xs = [float(row[0]) for row in points]
+    x_min, x_max = min(xs), max(xs)
+    if x_min == x_max:
+        x_min -= 1.0
+        x_max += 1.0
+
+    scatter = [[round(float(x), 8), round(float(y), 8)] for x, y in points]
+    line = [
+        [round(x_min, 8), round(intercept + slope * x_min, 8)],
+        [round(x_max, 8), round(intercept + slope * x_max, 8)],
+    ]
+    return GraphData(root=None, points=[], scatter=scatter, line=line)
+
+
 # ---------------------------------------------------------------------------
 # POST /api/solve
 # ---------------------------------------------------------------------------
@@ -119,7 +142,11 @@ def solve(req: SolveRequest) -> dict[str, Any]:
     method = req.method
     numeric_methods = ("bisection", "secant", "modified_secant")
 
-    if method in numeric_methods:
+    if method == "linear_regression":
+        if req.data is None:
+            raise SolverError("Linear regression requires data points (x y on each row)")
+        data = req.data
+    elif method in numeric_methods:
         if not req.equation:
             raise SolverError("An equation f(x) is required for this method")
         try:
@@ -148,20 +175,32 @@ def solve(req: SolveRequest) -> dict[str, Any]:
             res = modified_secant(f, p.x0, p.delta or 0.01, p.tolerance, p.max_iterations)
         elif method == "gauss_jacobi":
             res = gauss_jacobi(system, p.tolerance, p.max_iterations)
-        else:  # gauss_seidel
-            res = gauss_seidel(system, p.tolerance, p.max_iterations)
+        else:  # linear_regression
+            res = linear_regression(data)
     except OverflowError:
         raise SolverError("The calculation overflowed, check the inputs")
 
-    graph = _graph_points(f, float(res["root"]), p.a, p.b) if method in numeric_methods else None
+    if method in numeric_methods:
+        graph = _graph_points(f, float(res["root"]), p.a, p.b)
+    elif method == "linear_regression":
+        graph = _regression_graph(data, res["coefficients"])
+    else:
+        graph = None
+
+    error = res.get("error")
+    if error is None:
+        error = float(res["steps"][-1]["error"]) if res["steps"] and "error" in res["steps"][-1] else 0.0
 
     return {
         "method": method,
         "equation": req.equation,
         "root": float(res["root"]) if "root" in res else None,
         "solution": res.get("solution"),
-        "iterations": int(res["iterations"]),
-        "error": float(res["steps"][-1]["error"]) if res["steps"] and "error" in res["steps"][-1] else 0.0,
+        "coefficients": res.get("coefficients"),
+        "r2": res.get("r2"),
+        "n_points": res.get("n_points"),
+        "iterations": int(res.get("iterations", 0)),
+        "error": float(error),
         "converged": True,
         "steps": res["steps"],
         "graph": graph,

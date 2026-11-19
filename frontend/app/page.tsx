@@ -3,12 +3,12 @@
 import { useState } from "react";
 import styles from "./page.module.css";
 
-type Method = "bisection" | "gauss_jacobi" | "gauss_seidel" | "secant" | "modified_secant";
+type Method = "bisection" | "gauss_jacobi" | "linear_regression" | "secant" | "modified_secant";
 
 const METHODS: { value: Method; label: string }[] = [
   { value: "bisection", label: "Bisection Method" },
   { value: "gauss_jacobi", label: "Gauss-Jacobi Iteration" },
-  { value: "gauss_seidel", label: "Gauss-Seidel Iteration" },
+  { value: "linear_regression", label: "Linear Regression (Least Squares)" },
   { value: "secant", label: "Secant Method" },
   { value: "modified_secant", label: "Modified Secant Method" },
 ];
@@ -17,13 +17,21 @@ type Step = Record<string, number | string>;
 
 type Column = { key: string; label: string; text?: boolean };
 
-type GraphData = { root: number; points: number[][] };
+type GraphData = {
+  root: number | null;
+  points: number[][];
+  scatter: number[][] | null;
+  line: number[][] | null;
+};
 
 type SolveResult = {
   method: Method;
   equation: string | null;
   root: number | null;
   solution: number[] | null;
+  coefficients: number[] | null;
+  r2: number | null;
+  n_points: number | null;
   iterations: number;
   error: number;
   steps: Step[];
@@ -54,6 +62,13 @@ const SCALAR_COLUMNS: Partial<Record<Method, Column[]>> = {
     { key: "f2", label: "f(xn + δ·xn)" },
     { key: "error", label: "error" },
   ],
+  linear_regression: [
+    { key: "i", label: "i" },
+    { key: "x", label: "x" },
+    { key: "y", label: "y" },
+    { key: "yhat", label: "ŷ" },
+    { key: "residual", label: "residual" },
+  ],
 };
 
 function columnsFor(method: Method, firstStep: Step | undefined): Column[] {
@@ -65,7 +80,7 @@ function columnsFor(method: Method, firstStep: Step | undefined): Column[] {
     .filter((k) => /^v\d+$/.test(k))
     .sort((x, y) => Number(x.slice(1)) - Number(y.slice(1)));
 
-  // gauss_jacobi / gauss_seidel
+  // gauss_jacobi (dynamic values x1..xn)
   return [
     { key: "i", label: "i" },
     ...valueKeys.map((k, idx) => ({ key: k, label: `x${idx + 1}` })),
@@ -76,11 +91,17 @@ function columnsFor(method: Method, firstStep: Step | undefined): Column[] {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const SYSTEM_PLACEHOLDER = "4 3 0 120\n3 4 -1 127.4\n0 -1 4 91.5";
+const DATA_PLACEHOLDER = "1 2\n2 4\n3 5\n4 4";
 
 function fmt(v: number): string {
   if (!Number.isFinite(v)) return "—";
   if (v === 0) return "0";
   return String(parseFloat(v.toPrecision(6)));
+}
+
+function fittedEquation([intercept, slope]: number[]): string {
+  const sign = slope < 0 ? "−" : "+";
+  return `y = ${fmt(intercept)} ${sign} ${fmt(Math.abs(slope))}x`;
 }
 
 function fmtCell(v: number | string | undefined): string {
@@ -92,6 +113,7 @@ export default function Home() {
   const [method, setMethod] = useState<Method>("bisection");
   const [equation, setEquation] = useState("");
   const [system, setSystem] = useState("");
+  const [data, setData] = useState("");
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const [x0, setX0] = useState("");
@@ -106,18 +128,21 @@ export default function Home() {
   const [result, setResult] = useState<SolveResult | null>(null);
   const [showSteps, setShowSteps] = useState(true);
 
-  const isMatrix = method === "gauss_jacobi" || method === "gauss_seidel";
+  const isMatrix = method === "gauss_jacobi";
+  const isRegression = method === "linear_regression";
+  const needsEquation = !isMatrix && !isRegression;
   const needsInterval = method === "bisection";
   const needsX0 = method === "modified_secant";
   const needsX0X1 = method === "secant";
   const needsDelta = method === "modified_secant";
-  const needsTolerance = true;
-  const needsMaxIterations = true;
+  const needsTolerance = !isRegression;
+  const needsMaxIterations = !isRegression;
 
   function clear() {
     setMethod("bisection");
     setEquation("");
     setSystem("");
+    setData("");
     setA("");
     setB("");
     setX0("");
@@ -164,12 +189,48 @@ export default function Home() {
     return rows;
   }
 
+  function parseData(): number[][] | null {
+    const lines = data
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+    if (lines.length === 0) {
+      setFieldErrors({ data: "Enter at least 2 data points, one x y pair per line" });
+      return null;
+    }
+    const rows: number[][] = [];
+    for (const line of lines) {
+      const numbers = line
+        .split(/[\s,;]+/)
+        .filter(Boolean)
+        .map(Number);
+      if (numbers.length !== 2 || numbers.some((v) => !Number.isFinite(v))) {
+        setFieldErrors({ data: `Row "${line}" must contain exactly 2 numbers: x and y` });
+        return null;
+      }
+      rows.push(numbers);
+    }
+    if (rows.length < 2) {
+      setFieldErrors({ data: "Linear regression requires at least 2 data points" });
+      return null;
+    }
+    if (new Set(rows.map(([x]) => x)).size < 2) {
+      setFieldErrors({ data: "Linear regression requires at least two different x values" });
+      return null;
+    }
+    return rows;
+  }
+
   function validate(): boolean {
     const errors: Record<string, string> = {};
 
     if (isMatrix) {
       if (system.trim() === "") {
         errors.system = "The system cannot be empty";
+      }
+    } else if (isRegression) {
+      if (data.trim() === "") {
+        errors.data = "The data points cannot be empty";
       }
     } else if (!equation.trim()) {
       errors.equation = "The equation cannot be empty";
@@ -223,6 +284,10 @@ export default function Home() {
       // Parse the matrix so the exact shape error (if any) can be shown too.
       if (parseSystem() === null) return false;
     }
+    if (isRegression && !errors.data) {
+      // Parse the data so the exact row/shape error (if any) can be shown too.
+      if (parseData() === null) return false;
+    }
     return Object.keys(errors).length === 0;
   }
 
@@ -247,6 +312,8 @@ export default function Home() {
     const body: Record<string, unknown> = { method, params };
     if (isMatrix) {
       body.system = parseSystem();
+    } else if (isRegression) {
+      body.data = parseData();
     } else {
       body.equation = equation;
     }
@@ -326,7 +393,7 @@ export default function Home() {
             </select>
           </label>
 
-          {!isMatrix && (
+          {needsEquation && (
             <label className={`${styles.field} ${styles.fieldWide}`}>
               <span className={styles.fieldLabel}>Equation f(x) =</span>
               <input
@@ -359,6 +426,22 @@ export default function Home() {
               <span className={styles.helpText}>
               </span>
               {fieldErrors.system && <span className={styles.fieldError}>{fieldErrors.system}</span>}
+            </label>
+          )}
+
+          {isRegression && (
+            <label className={`${styles.field} ${styles.fieldWide}`}>
+              <span className={styles.fieldLabel}>Data points (x y)</span>
+              <textarea
+                dir="ltr"
+                rows={4}
+                placeholder={DATA_PLACEHOLDER}
+                className={`${styles.input} ${styles.systemInput} ${fieldErrors.data ? styles.inputError : ""}`}
+                value={data}
+                onChange={(e) => setData(e.target.value)}
+              />
+              <span className={styles.helpText}>One pair per line, for example: 1 2</span>
+              {fieldErrors.data && <span className={styles.fieldError}>{fieldErrors.data}</span>}
             </label>
           )}
 
@@ -414,12 +497,42 @@ export default function Home() {
                     </span>
                   </div>
                 )}
+                {result.coefficients != null && (
+                  <>
+                    <div className={styles.metric}>
+                      <span className={styles.metricLabel}>Intercept (a)</span>
+                      <span className={styles.metricValue}>{fmt(result.coefficients[0])}</span>
+                    </div>
+                    <div className={styles.metric}>
+                      <span className={styles.metricLabel}>Slope (b)</span>
+                      <span className={styles.metricValue}>{fmt(result.coefficients[1])}</span>
+                    </div>
+                    <div className={`${styles.metric} ${styles.metricWide}`}>
+                      <span className={styles.metricLabel}>Fitted line</span>
+                      <span className={styles.metricValue} dir="ltr">
+                        {fittedEquation(result.coefficients)}
+                      </span>
+                    </div>
+                    {result.r2 != null && (
+                      <div className={styles.metric}>
+                        <span className={styles.metricLabel}>R²</span>
+                        <span className={styles.metricValue}>{fmt(result.r2)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
                 <div className={styles.metric}>
-                  <span className={styles.metricLabel}>Number of iterations</span>
-                  <span className={styles.metricValue}>{result.iterations}</span>
+                  <span className={styles.metricLabel}>
+                    {result.method === "linear_regression" ? "Data points" : "Number of iterations"}
+                  </span>
+                  <span className={styles.metricValue}>
+                    {result.method === "linear_regression" ? (result.n_points ?? "—") : result.iterations}
+                  </span>
                 </div>
                 <div className={styles.metric}>
-                  <span className={styles.metricLabel}>Final error</span>
+                  <span className={styles.metricLabel}>
+                    {result.method === "linear_regression" ? "RMSE" : "Final error"}
+                  </span>
                   <span className={styles.metricValue}>{fmt(result.error)}</span>
                 </div>
                 <div className={styles.metric}>
@@ -479,54 +592,86 @@ export default function Home() {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Graph: simple SVG plot of f(x) with the root marked                        */
+/* Graph: SVG plot of f(x) with the root marked, or a regression scatter plot */
 
 function Plot({ graph }: { graph: GraphData }) {
-  const points = graph.points;
-  if (points.length < 2) return null;
+  const curve = graph.points ?? [];
+  const scatter = graph.scatter ?? [];
+  const line = graph.line ?? [];
+  const allPoints = [...curve, ...scatter, ...line];
+  if (allPoints.length < 2) return null;
 
   const W = 640;
   const H = 280;
   const PAD = 12;
 
-  const xs = points.map(([x]) => x);
-  const ys = points.map(([, y]) => y);
+  const xs = allPoints.map(([x]) => x);
+  const ys = allPoints.map(([, y]) => y);
   const xMin = Math.min(...xs);
   const xMax = Math.max(...xs);
+  const xSpan = xMax - xMin || 1;
   let yMin = Math.min(...ys);
   let yMax = Math.max(...ys);
-  // Keep the axis line and root visible inside the window.
-  yMin = Math.min(yMin, 0);
-  yMax = Math.max(yMax, 0);
+  // For a function plot, keep the x axis (and the root marker) in view.
+  if (graph.root !== null) {
+    yMin = Math.min(yMin, 0);
+    yMax = Math.max(yMax, 0);
+  }
   if (yMax - yMin < 1e-12) {
     yMax = yMin + 1;
   }
 
-  const px = (x: number) => PAD + ((x - xMin) / (xMax - xMin)) * (W - 2 * PAD);
+  const px = (x: number) => PAD + ((x - xMin) / xSpan) * (W - 2 * PAD);
   const py = (y: number) => H - PAD - ((y - yMin) / (yMax - yMin)) * (H - 2 * PAD);
   const clamp = (v: number) => Math.min(Math.max(v, PAD), H - PAD);
 
-  const path = points.map(([x, y], i) => `${i === 0 ? "M" : "L"}${px(x).toFixed(2)},${clamp(py(y)).toFixed(2)}`).join(" ");
+  const path = curve
+    .map(([x, y], i) => `${i === 0 ? "M" : "L"}${px(x).toFixed(2)},${clamp(py(y)).toFixed(2)}`)
+    .join(" ");
+  const hasZero = yMin <= 0 && yMax >= 0;
 
   return (
     <svg
       className={styles.plot}
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label="Plot of f(x) with the root marked"
+      aria-label={
+        graph.root !== null
+          ? "Plot of f(x) with the root marked"
+          : "Scatter plot of the data points with the fitted line"
+      }
     >
       {/* x axis */}
-      <line x1={PAD} y1={py(0)} x2={W - PAD} y2={py(0)} className={styles.plotAxis} />
+      {hasZero && <line x1={PAD} y1={py(0)} x2={W - PAD} y2={py(0)} className={styles.plotAxis} />}
+      {/* fitted line (regression) */}
+      {line.length >= 2 && (
+        <line
+          x1={px(line[0][0])}
+          y1={clamp(py(line[0][1]))}
+          x2={px(line[1][0])}
+          y2={clamp(py(line[1][1]))}
+          className={styles.fitLine}
+        />
+      )}
+      {/* function curve */}
+      {curve.length >= 2 && <path d={path} className={styles.plotLine} fill="none" />}
+      {/* data points (regression) */}
+      {scatter.map(([x, y], i) => (
+        <circle key={i} cx={px(x)} cy={clamp(py(y))} r={4} className={styles.scatterDot} />
+      ))}
       {/* root marker */}
-      <line
-        x1={px(graph.root)}
-        y1={PAD}
-        x2={px(graph.root)}
-        y2={H - PAD}
-        className={styles.rootMarker}
-      />
-      <circle cx={px(graph.root)} cy={py(0)} r={4} className={styles.rootDot} />
-      <path d={path} className={styles.plotLine} fill="none" />
+      {graph.root !== null && (
+        <>
+          <line
+            x1={px(graph.root)}
+            y1={PAD}
+            x2={px(graph.root)}
+            y2={H - PAD}
+            className={styles.rootMarker}
+          />
+          <circle cx={px(graph.root)} cy={py(0)} r={4} className={styles.rootDot} />
+        </>
+      )}
     </svg>
   );
 }
